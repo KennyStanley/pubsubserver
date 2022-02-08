@@ -15,7 +15,7 @@ try {
 }
 
 export const config: Config = {
-    port: parseInt(process.env.PORT || '8080'),
+    port: parseInt(process.env.PORT || '4040'),
     useRedis: false,
     redisUrl: process.env.REDIS_URL || 'redis://localhost:6379',
     https,
