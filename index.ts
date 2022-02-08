@@ -1,5 +1,6 @@
-import { createServer } from 'https'
-import { Server } from 'socket.io'
+import { createServer, Server } from 'http'
+import { createServer as createHttpsServer, Server as HttpsServer } from 'https'
+import { Server as SocketServer } from 'socket.io'
 import { createClient } from 'redis'
 import { config } from 'dotenv'
 config()
@@ -7,10 +8,17 @@ import fs from 'fs'
 import { Message } from './types'
 
 // Global variables
-const httpsServer = createServer({
-    key: fs.readFileSync('./certificates/key.pem'),
-    cert: fs.readFileSync('./certificates/cert.pem'),
-})
+let server: Server | HttpsServer
+try {
+    server = createHttpsServer({
+        key: fs.readFileSync('./certificates/key.pem'),
+        cert: fs.readFileSync('./certificates/cert.pem'),
+    })
+    console.log('HTTPS server created')
+} catch (error) {
+    server = createServer()
+    console.log('HTTP server created')
+}
 const url = process.env.REDIS_URL || 'redis://localhost:6379'
 const redisClient = createClient({ url })
 
@@ -18,7 +26,7 @@ const redisClient = createClient({ url })
 ;(async () => {
     await connectRedis()
     setupSocketServer()
-    startHttpsServer()
+    startServer()
 })()
 
 async function connectRedis() {
@@ -27,7 +35,7 @@ async function connectRedis() {
 }
 
 function setupSocketServer() {
-    const io = new Server(httpsServer, {
+    const io = new SocketServer(server, {
         cors: {
             origin: '*',
         },
@@ -73,9 +81,9 @@ function setupSocketServer() {
     }
 }
 
-function startHttpsServer() {
+function startServer() {
     const PORT = parseInt(process.env.SOCKET_PORT || '4040')
-    httpsServer.listen(PORT, () => {
+    server.listen(PORT, () => {
         console.log(`Listening on port ${PORT}`)
     })
 }
