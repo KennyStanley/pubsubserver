@@ -2,36 +2,39 @@ import { createServer, Server } from 'http'
 import { createServer as createHttpsServer, Server as HttpsServer } from 'https'
 import { Server as SocketServer } from 'socket.io'
 import { createClient } from 'redis'
-import { config } from 'dotenv'
-config()
-import fs from 'fs'
+import { config } from './config'
 import { Message } from './types'
+import createLocalRepo from './db'
 
 // Global variables
 let server: Server | HttpsServer
-try {
+if (config.https.cert != null && config.https.key != null) {
     server = createHttpsServer({
-        key: fs.readFileSync('./certificates/key.pem'),
-        cert: fs.readFileSync('./certificates/cert.pem'),
+        key: config.https.key,
+        cert: config.https.cert,
     })
     console.log('HTTPS server created')
-} catch (error) {
+} else {
     server = createServer()
     console.log('HTTP server created')
 }
-const url = process.env.REDIS_URL || 'redis://localhost:6379'
-const redisClient = createClient({ url })
+let db: any
+if (config.useRedis) {
+    db = createClient({ url: config.redisUrl })
+} else {
+    db = createLocalRepo()
+}
 
 // Main Process
 ;(async () => {
-    await connectRedis()
+    if (config.useRedis) await connectRedis()
     setupSocketServer()
     startServer()
 })()
 
 async function connectRedis() {
-    redisClient.on('error', err => console.log('Redis Client Error', err))
-    await redisClient.connect()
+    db.on('error', (err: any) => console.log('Redis Client Error', err))
+    await db.connect()
 }
 
 function setupSocketServer() {
@@ -45,8 +48,6 @@ function setupSocketServer() {
         console.log(`${socket.id} connected`)
 
         socket.on('subscribe', async (topic: string) => {
-            console.log(`${socket.id} subscribed to ${topic}`)
-
             socket.join(topic)
             console.log(`${socket.id} subscribed to ${topic}`)
 
@@ -55,12 +56,14 @@ function setupSocketServer() {
         })
 
         socket.on('publish', async (message: Message) => {
-            // save message to redis
-            await setMessage(message)
-            console.log(`${socket.id} published ${message}`)
+            const { topic, data, persistent } = message
+            if (persistent) {
+                await setMessage(message)
+            }
+            console.log(`${socket.id} published '${data}' to topic '${topic}'`)
 
             // send message to everyone in the room including the sender
-            socket.nsp.to(message.topic).emit('message', message)
+            socket.nsp.to(topic).emit('message', { topic, data })
         })
 
         socket.on('disconnect', () => {
@@ -69,21 +72,20 @@ function setupSocketServer() {
     })
 
     async function getMessage(topic: string) {
-        if (!redisClient.isOpen) await redisClient.connect()
-        return await redisClient.get(topic)
+        if (!db.isOpen) await db.connect()
+        return await db.get(topic)
     }
 
     // overwrites last message on the same topic
     async function setMessage(message: Message) {
         const { topic, data } = message
-        if (!redisClient.isOpen) await redisClient.connect()
-        await redisClient.set(topic, data)
+        if (!db.isOpen) await db.connect()
+        await db.set(topic, data)
     }
 }
 
 function startServer() {
-    const PORT = parseInt(process.env.SOCKET_PORT || '4040')
-    server.listen(PORT, () => {
-        console.log(`Listening on port ${PORT}`)
+    server.listen(config.port, () => {
+        console.log(`Listening on port ${config.port}`)
     })
 }
